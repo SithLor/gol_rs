@@ -401,6 +401,7 @@ fn setup() {
     // create ./src/frames directory
     std::fs::create_dir("./src/frames").unwrap();
 }
+// helper function to run ffmpeg to create a video from the generated PNG frames
 fn run_ffmpeg(fps: u32, x: u32, y: u32) {
     use std::process::Command;
 
