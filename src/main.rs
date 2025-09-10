@@ -1,6 +1,8 @@
 // This imports the necessary traits for parallel iterators
 // function to compute the next generation
 
+#![feature(target_feature_inline_always)]
+
 mod slower {
     const MAX_ITERATIONS: u32 = 100;
     const X: u32 = 512;
@@ -407,6 +409,8 @@ mod faster_hw {
 
     use rand::Rng;
     use rayon::prelude::*;
+    #[cfg(all(target_arch = "x86_64"))]
+    use std::arch::x86_64::*;
     use std::time::Instant;
     use std::{arch::is_aarch64_feature_detected, arch::is_x86_feature_detected};
 
@@ -441,8 +445,12 @@ mod faster_hw {
         // Detect features
         #[cfg(all(target_arch = "x86_64"))]
         {
-            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("avx512vl") && is_x86_feature_detected!("avx512dq") {
-                println!("AVX-512 detected");
+            if is_x86_feature_detected!("avx512bw")
+                && is_x86_feature_detected!("avx512f")
+                && is_x86_feature_detected!("avx512vl")
+                && is_x86_feature_detected!("avx512dq")
+            {
+                //println!("AVX-512 detected");
                 step_kernel_avx512(current, rows, cols, out);
                 return;
             } else if is_x86_feature_detected!("avx2") {
@@ -633,45 +641,30 @@ mod faster_hw {
             });
     }
 
-    ///////////////////////////////////////////////////////////////////////////////
-    // AVX-512 kernel: implemented by invoking the AVX2 32-byte worker twice
-    // (process 64 bytes per iteration). This keeps the code correct and avoids
-    // more fragile AVX-512 packing intrinsics in this drop-in example.
-    // On AVX-512-capable CPUs this still performs well because we do wider loads
-    // (we still use the proven AVX2 inner math).
-    ///////////////////////////////////////////////////////////////////////////////
+    //hell on earth - AVX-512 version processing 64 bytes per loop
     #[cfg(all(target_arch = "x86_64"))]
-    #[target_feature(enable = "avx512f,avx512bw")]
-    unsafe fn step_kernel_avx512(current: &[u8], rows: usize, cols: usize, out: &mut [u8]) {
-        // We'll process blocks of 64 bytes per iteration by calling the AVX2 32-byte
-        // worker for j and j+32. This keeps the logic simple & safe.
-        // (If you want full 512-bit lane arithmetic, we can implement it, but it's more verbose.)
+    pub unsafe fn step_kernel_avx512(current: &[u8], rows: usize, cols: usize, out: &mut [u8]) {
         let stride = cols + 2;
+
+        // Process inner rows in parallel
         out[stride..(rows + 1) * stride]
             .par_chunks_mut(stride)
             .enumerate()
             .for_each(|(i0, out_row)| {
                 let i = i0 + 1;
                 let row_base = i * stride;
+
+                // borders = 0
                 *out_row.get_unchecked_mut(0) = 0;
                 *out_row.get_unchecked_mut(cols + 1) = 0;
 
-                // inner loop over 64-byte blocks (two 32-byte chunks)
                 let mut j = 1usize;
                 while j + 63 <= cols {
-                    // call AVX2 worker on j (32 bytes) and j+32 (next 32 bytes)
-                    step_row_avx2_chunk(current, row_base, stride, j, out_row);
-                    step_row_avx2_chunk(current, row_base, stride, j + 32, out_row);
+                    process_block_avx512(current, out_row, row_base + j, stride, row_base);
                     j += 64;
                 }
 
-                // leftover 32-byte chunk
-                while j + 31 <= cols {
-                    step_row_avx2_chunk(current, row_base, stride, j, out_row);
-                    j += 32;
-                }
-
-                // tail scalar
+                // tail (scalar fallback)
                 let mut idx = row_base + j;
                 while j <= cols {
                     let alive = *current.get_unchecked(idx);
@@ -690,8 +683,63 @@ mod faster_hw {
             });
     }
 
-    /// Helper: call AVX2 32-byte worker for a single 32-byte-aligned chunk at column j.
-    /// We mark as target_feature(avx2) so it compiles the inner intrinsics.
+    #[inline(always)]
+    #[target_feature(enable = "avx512f,avx512vl,avx512bw,avx512dq")]
+    unsafe fn process_block_avx512(
+        current: &[u8],
+        out_row: &mut [u8],
+        idx: usize,
+        stride: usize,
+        row_base: usize,
+    ) {
+        // load center
+        let c = _mm512_loadu_si512(current.as_ptr().add(idx) as *const __m512i);
+
+        // load neighbors: left/right
+        let left = _mm512_loadu_si512(current.as_ptr().add(idx - 1) as *const __m512i);
+        let right = _mm512_loadu_si512(current.as_ptr().add(idx + 1) as *const __m512i);
+
+        // load up / down rows
+        let up = _mm512_loadu_si512(current.as_ptr().add(idx - stride) as *const __m512i);
+        let down = _mm512_loadu_si512(current.as_ptr().add(idx + stride) as *const __m512i);
+
+        // diagonals
+        let up_left = _mm512_loadu_si512(current.as_ptr().add(idx - stride - 1) as *const __m512i);
+        let up_right = _mm512_loadu_si512(current.as_ptr().add(idx - stride + 1) as *const __m512i);
+        let down_left =
+            _mm512_loadu_si512(current.as_ptr().add(idx + stride - 1) as *const __m512i);
+        let down_right =
+            _mm512_loadu_si512(current.as_ptr().add(idx + stride + 1) as *const __m512i);
+
+        // sum 8 neighbors (each cell is 0/1, fits in u8)
+        let mut sum = _mm512_add_epi8(left, right);
+        sum = _mm512_add_epi8(sum, up);
+        sum = _mm512_add_epi8(sum, down);
+        sum = _mm512_add_epi8(sum, up_left);
+        sum = _mm512_add_epi8(sum, up_right);
+        sum = _mm512_add_epi8(sum, down_left);
+        sum = _mm512_add_epi8(sum, down_right);
+
+        // alive mask
+        let alive_mask = _mm512_cmpeq_epi8_mask(c, _mm512_set1_epi8(1));
+
+        // sum == 2 or 3
+        let eq2 = _mm512_cmpeq_epi8_mask(sum, _mm512_set1_epi8(2));
+        let eq3 = _mm512_cmpeq_epi8_mask(sum, _mm512_set1_epi8(3));
+
+        // rule: new = (sum==3) || (alive && sum==2)
+        let survive_mask = eq3 | (alive_mask & eq2);
+
+        // write 1 where survive_mask, else 0
+        let res = _mm512_mask_blend_epi8(survive_mask, _mm512_setzero_si512(), _mm512_set1_epi8(1));
+
+        // FIXED: store relative to out_row, not global buffer
+        _mm512_storeu_si512(
+            out_row.as_mut_ptr().add(idx - row_base) as *mut __m512i,
+            res,
+        );
+    }
+
     #[cfg(all(target_arch = "x86_64"))]
     #[target_feature(enable = "avx2")]
     unsafe fn step_row_avx2_chunk(
@@ -909,10 +957,6 @@ mod faster_hw {
                 }
             });
     }
-
-    ///////////////////////////////////////////////////////////////////////////////
-    // End of file
-    ///////////////////////////////////////////////////////////////////////////////
 
     pub fn gol_faster_stream() {
         let (rows, cols) = (X as usize, Y as usize);
