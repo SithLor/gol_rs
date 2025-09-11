@@ -1,0 +1,41 @@
+thread 'rustc' panicked at compiler\rustc_errors\src\lib.rs:726:17:
+`trimmed_def_paths` called, diagnostics were expected but none were emitted. Use `with_no_trimmed_paths` for debugging. Backtraces are currently disabled: set `RUST_BACKTRACE=1` and re-run to see where it happened.
+stack backtrace:
+   0:     0x7ff87866a03e - std::backtrace_rs::backtrace::win64::trace
+                               at /rustc/7ad23f43a225546c095123de52cc07d8719f8e2b/library\std\src\..\..\backtrace\src\backtrace\win64.rs:85
+   1:     0x7ff87866a03e - std::backtrace_rs::backtrace::trace_unsynchronized
+                               at /rustc/7ad23f43a225546c095123de52cc07d8719f8e2b/library\std\src\..\..\backtrace\src\backtrace\mod.rs:66
+   2:     0x7ff87866a03e - std::backtrace::Backtrace::create
+                               at /rustc/7ad23f43a225546c095123de52cc07d8719f8e2b/library\std\src\backtrace.rs:331
+   3:     0x7ff878669f7a - std::backtrace::Backtrace::force_capture
+                               at /rustc/7ad23f43a225546c095123de52cc07d8719f8e2b/library\std\src\backtrace.rs:312
+   4:     0x7ff879e5690b - core[9201c249597990c3]::slice::sort::unstable::heapsort::heapsort::<((rustc_lint_defs[c9e85401c0f82309]::Level, &str), usize), <((rustc_lint_defs[c9e85401c0f82309]::Level, &str), usize) as core[9201c249597990c3]::cmp::PartialOrd>::lt>
+   5:     0x7ff87866b32a - std::panicking::panic_with_hook
+                               at /rustc/7ad23f43a225546c095123de52cc07d8719f8e2b/library\std\src\panicking.rs:842
+   6:     0x7ff87866b0b9 - std::panicking::panic_handler::closure$0
+                               at /rustc/7ad23f43a225546c095123de52cc07d8719f8e2b/library\std\src\panicking.rs:707
+   7:     0x7ff87866324f - std::sys::backtrace::__rust_end_short_backtrace<std::panicking::panic_handler::closure_env$0,never$>
+                               at /rustc/7ad23f43a225546c095123de52cc07d8719f8e2b/library\std\src\sys\backtrace.rs:174
+   8:     0x7ff878644fbe - std::panicking::panic_handler
+                               at /rustc/7ad23f43a225546c095123de52cc07d8719f8e2b/library\std\src\panicking.rs:698
+   9:     0x7ff87c7a8481 - core::panicking::panic_fmt
+                               at /rustc/7ad23f43a225546c095123de52cc07d8719f8e2b/library\core\src\panicking.rs:75
+  10:     0x7ff8785326e0 - <rustc_errors[6219e5a8876ecfbf]::DiagCtxtInner as core[9201c249597990c3]::ops::drop::Drop>::drop
+  11:     0x7ff875c08fa0 - llvm::function_ref<void __cdecl(llvm::Value const * __ptr64)>::callback_fn<`llvm::Value::stripInBoundsOffsets'::`1'::<lambda_1_1> >
+  12:     0x7ff875c0989a - llvm::function_ref<void __cdecl(llvm::Value const * __ptr64)>::callback_fn<`llvm::Value::stripInBoundsOffsets'::`1'::<lambda_1_1> >
+  13:     0x7ff875c2b6b1 - llvm::function_ref<void __cdecl(llvm::Value const * __ptr64)>::callback_fn<`llvm::Value::stripInBoundsOffsets'::`1'::<lambda_1_1> >
+  14:     0x7ff875c37569 - std[c16ba45f833980ee]::sys::backtrace::__rust_begin_short_backtrace::<<std[c16ba45f833980ee]::thread::Builder>::spawn_unchecked_<ctrlc[cb92e8f8cd125a41]::set_handler_inner<rustc_driver_impl[7ac85c7c565a839e]::install_ctrlc_handler::{closure#0}>::{closure#0}, ()>::{closure#1}::{closure#0}::{closure#0}, ()>
+  15:     0x7ff875c3298f - RINvNtNtCsgBzviSfxLkM_3std3sys9backtrace28___rust_begin_short_backtraceNCNCINvNtCs4h6t7xVMy5d_15rustc_interface4util26run_in_thread_with_globalsNCINvB1e_31run_in_thread_pool_with_globalsNCINvNtB1g_9interface12run_compileruNCNvCsaxzi69B8nfK_17rustc_driver_i
+  16:     0x7ff875c40dbd - std[c16ba45f833980ee]::sys::backtrace::__rust_begin_short_backtrace::<<std[c16ba45f833980ee]::thread::Builder>::spawn_unchecked_<ctrlc[cb92e8f8cd125a41]::set_handler_inner<rustc_driver_impl[7ac85c7c565a839e]::install_ctrlc_handler::{closure#0}>::{closure#0}, ()>::{closure#1}::{closure#0}::{closure#0}, ()>
+  17:     0x7ff878658f2d - alloc::boxed::impl$29::call_once
+                               at /rustc/7ad23f43a225546c095123de52cc07d8719f8e2b/library\alloc\src\boxed.rs:1985
+  18:     0x7ff878658f2d - alloc::boxed::impl$29::call_once
+                               at /rustc/7ad23f43a225546c095123de52cc07d8719f8e2b/library\alloc\src\boxed.rs:1985
+  19:     0x7ff878658f2d - std::sys::pal::windows::thread::impl$0::new::thread_start
+                               at /rustc/7ad23f43a225546c095123de52cc07d8719f8e2b/library\std\src\sys\pal\windows\thread.rs:60
+  20:     0x7ff9a781e8d7 - BaseThreadInitThunk
+  21:     0x7ff9a819c34c - RtlUserThreadStart
+
+
+rustc version: 1.91.0-nightly (7ad23f43a 2025-09-09)
+platform: x86_64-pc-windows-msvc

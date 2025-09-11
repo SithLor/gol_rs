@@ -34,11 +34,7 @@ rustflags = [
 	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
 ]
 
-[target.x86_64-apple-darwin]
-rustflags = [
-	"-C", "target-cpu=znver4",
-	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
-]
+
 [target.aarch64-apple-darwin]
 rustflags = [
 	"-C", "target-cpu=apple-m1",

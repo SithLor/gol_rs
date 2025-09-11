@@ -1,20 +1,30 @@
-// This imports the necessary traits for parallel iterators
-// function to compute the next generation
+const CONFIG_FPS: u32 = 120;
+const CONFIG_VIDEO_LENGTH_SECONDS: u32 = 10;
+const CONFIG_X: u32 = 512; // 4k resolution
+const CONFIG_Y: u32 = 512; // 4k resolution
+const CONFIG_SAVE_LOCATION: &str = "./src/frames";
+const CONFIG_MAX_ITERATIONS: u32 = CONFIG_FPS * CONFIG_VIDEO_LENGTH_SECONDS;
 
-#![feature(target_feature_inline_always)]
+use std::path;
+use std::sync::RwLock;
+use std::time::Instant;
+
+use rayon::str::SplitWhitespace;
+static METHOD: RwLock<&str> = RwLock::new(" ");
 
 mod slower {
-    const MAX_ITERATIONS: u32 = 100;
-    const X: u32 = 512;
-    const Y: u32 = 512;
-    const SAVE_LOCATION: &str = "./src/frames";
+    pub const FPS: u32 = super::CONFIG_FPS;
+    pub const VIDEO_LENGTH_SECONDS: u32 = super::CONFIG_VIDEO_LENGTH_SECONDS;
+
+    pub const MAX_ITERATIONS: u32 = super::CONFIG_FPS * super::CONFIG_VIDEO_LENGTH_SECONDS;
+    pub const X: u32 = super::CONFIG_X; // 4k resolution
+    pub const Y: u32 = super::CONFIG_Y; // 4k resolution
+    pub const SAVE_LOCATION: &str = super::CONFIG_SAVE_LOCATION;
 
     use rand::Rng;
-    use rayon::prelude::*;
     use std::time::Instant;
-    // std imports will be pulled where needed to avoid unused warnings
 
-    pub fn simultion(grid: &Vec<Vec<i8>>) -> Vec<Vec<i8>> {
+    fn simultion(grid: &Vec<Vec<i8>>) -> Vec<Vec<i8>> {
         // get the number of rows
         let n = grid.len();
 
@@ -68,10 +78,10 @@ mod slower {
             }
         }
         let random_grid_elapsed: u128 = random_grid_timer.elapsed().as_nanos();
-        println!(
-            "Random grid initialization time for a {}x{} grid: {} ns",
-            X, Y, random_grid_elapsed
-        );
+        //println!(
+        //    "Random grid initialization time for a {}x{} grid: {} ns",
+        //    X, Y, random_grid_elapsed
+        //);
 
         let simulation_timer: Instant = Instant::now();
         for iteration in 0..MAX_ITERATIONS {
@@ -79,24 +89,24 @@ mod slower {
             grid_history[iteration as usize] = grid.clone();
         }
         let simulation_elapsed: u128 = simulation_timer.elapsed().as_nanos();
-        println!(
-            "Simulation time for {} iterations on a {}x{} grid: {} ns",
-            MAX_ITERATIONS, X, Y, simulation_elapsed
-        );
+        //println!(
+        //    "Simulation time for {} iterations on a {}x{} grid: {} ns",
+        //    MAX_ITERATIONS, X, Y, simulation_elapsed
+        //);
 
         let io_timer: Instant = Instant::now();
         for iteration in 0..MAX_ITERATIONS {
             grid_to_image(&grid_history[iteration as usize], iteration, SAVE_LOCATION);
         }
         let io_elapsed: u128 = io_timer.elapsed().as_nanos();
-        println!(
-            "I/O time for saving {} iterations on a {}x{} grid: {} ns",
-            MAX_ITERATIONS, X, Y, io_elapsed
-        );
+        //println!(
+        //    "I/O time for saving {} iterations on a {}x{} grid: {} ns",
+        //    MAX_ITERATIONS, X, Y, io_elapsed
+        //);
 
         //clear the console
-        print!("{}[2J", 27 as char);
-        println!("gol()");
+        //print!("{}[2J", 27 as char);
+        println!("gol_stock()");
         println!("  Information:");
         println!("          Grid size: {}x{}", X, Y);
         println!("          Total iterations: {}", MAX_ITERATIONS);
@@ -104,8 +114,49 @@ mod slower {
         println!("          Init time: {} ns", random_grid_elapsed);
         println!("          Simulation time: {} ns", simulation_elapsed);
         println!("          I/O time: {} ns", io_elapsed);
+        println!(
+            "          Total time: {} ns",
+            (random_grid_elapsed + simulation_elapsed + io_elapsed) / 1_000_000
+        );
     }
 
+    fn run_ffmpeg(fps: u32, x: u32, y: u32) {
+        use std::process::Command;
+
+        let output = Command::new("ffmpeg")
+            .args(&[
+                "-framerate",
+                format!("{}", fps).as_str(),
+                "-i",
+                "./src/frames/gol_%d.png",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                format!(
+                    "gol_simulation_fps_{}_X_{}_Y_{}_M_{}.mp4",
+                    fps,
+                    x,
+                    y,
+                    *super::METHOD.read().unwrap()
+                )
+                .as_str(),
+            ])
+            .output()
+            .expect("Failed to execute ffmpeg command");
+
+        if output.status.success() {
+            println!(
+                "Video created successfully: gol_simulation_fps_{}_X_{}_Y_{}.mp4",
+                fps, x, y
+            );
+        } else {
+            eprintln!(
+                "Error creating video: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
     fn grid_to_image(grid: &Vec<Vec<i8>>, iteration: u32, save_location: &str) {
         let n = grid.len();
         let m = grid[0].len();
@@ -131,23 +182,36 @@ mod slower {
     fn create_grid_history(rows: usize, cols: usize, max_iterations: usize) -> Vec<Vec<Vec<i8>>> {
         vec![vec![vec![0; cols]; rows]; max_iterations]
     }
+
+    pub fn RUN() {
+        if std::path::Path::new("./src/frames").exists() {
+            std::fs::remove_dir_all("./src/frames").unwrap();
+        }
+        std::fs::create_dir("./src/frames").unwrap();
+
+        *super::METHOD.write().unwrap() = "stock";
+        gol();
+        run_ffmpeg(FPS, X, Y);
+    }
 }
 
 mod faster {
     // 512x512 take 0,32 sec so 1920
 
-    pub const FPS: u32 = 120;
-    pub const VIDEO_LENGTH_SECONDS: u32 = 10;
-    pub const VIDEO_FRAMES: u32 = FPS * VIDEO_LENGTH_SECONDS;
-
-    pub const MAX_ITERATIONS: u32 = VIDEO_FRAMES;
-    pub const X: u32 = 512; // 4k resolution
-    pub const Y: u32 = 512; // 4k resolution 
-    pub const SAVE_LOCATION: &str = "./src/frames";
+    const FPS: u32 = super::CONFIG_FPS;
+    const VIDEO_LENGTH_SECONDS: u32 = super::CONFIG_VIDEO_LENGTH_SECONDS;
+    const MAX_ITERATIONS: u32 = super::CONFIG_FPS * super::CONFIG_VIDEO_LENGTH_SECONDS;
+    const X: u32 = super::CONFIG_X; // 4k resolution
+    const Y: u32 = super::CONFIG_Y; // 4k resolution
+    const SAVE_LOCATION: &str = super::CONFIG_SAVE_LOCATION;
 
     use rand::Rng;
     use rayon::prelude::*;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
     use std::time::Instant;
+
+    use crate::append_results_to_file;
 
     fn grid_to_image_flat(
         grid: &[u8],
@@ -173,69 +237,6 @@ mod faster {
         imgbuf
             .save(format!("{}/gol_{}.png", save_location, iteration))
             .unwrap();
-    }
-
-    pub fn gol_faster() {
-        let (rows, cols) = (X as usize, Y as usize);
-        let mut grid = create_grid(rows, cols);
-        let mut next = create_grid(rows, cols);
-
-        // Efficient random state initialization
-        let random_grid_timer: Instant = Instant::now();
-        let mut rng = rand::rng();
-        {
-            let stride = cols + 2;
-            for y in 0..rows {
-                let base = (y + 1) * stride + 1;
-                let row_slice = &mut grid[base..base + cols];
-                rng.fill(row_slice);
-                for v in row_slice.iter_mut() {
-                    *v &= 1;
-                }
-            }
-        }
-        let random_grid_elapsed: u128 = random_grid_timer.elapsed().as_nanos();
-        println!(
-            "Random grid initialization time for a {}x{} grid: {} ns",
-            X, Y, random_grid_elapsed
-        );
-
-        let mut sim_ns: u128 = 0;
-        let mut io_ns: u128 = 0;
-        for iteration in 0..MAX_ITERATIONS {
-            let t0 = Instant::now();
-            step_par(&grid, rows, cols, &mut next);
-            sim_ns += t0.elapsed().as_nanos();
-
-            // Swap so we save the just-computed generation from `grid`
-            std::mem::swap(&mut grid, &mut next);
-
-            let t1 = Instant::now();
-            grid_to_image_flat(&grid, rows, cols, iteration, SAVE_LOCATION);
-            io_ns += t1.elapsed().as_nanos();
-        }
-        let simulation_elapsed: u128 = sim_ns;
-        println!(
-            "Simulation time for {} iterations on a {}x{} grid: {} ns",
-            MAX_ITERATIONS, X, Y, simulation_elapsed
-        );
-
-        let io_elapsed: u128 = io_ns;
-        println!(
-            "I/O time for saving {} iterations on a {}x{} grid: {} ns",
-            MAX_ITERATIONS, X, Y, io_elapsed
-        );
-
-        //clear the console
-        print!("{}[2J", 27 as char);
-        println!("gol_faster()");
-        println!("  Information:");
-        println!("          Grid size: {}x{}", X, Y);
-        println!("          Total iterations: {}", MAX_ITERATIONS);
-        println!("  Summary:");
-        println!("          Init time: {} ns", random_grid_elapsed);
-        println!("          Simulation time: {} ns", simulation_elapsed);
-        println!("          I/O time: {} ns", io_elapsed);
     }
 
     #[inline(always)]
@@ -281,7 +282,9 @@ mod faster {
                 }
             });
     }
-    pub fn gol_faster_stream() {
+    fn gol_faster_stream() {
+        *super::METHOD.write().unwrap() = "faster_hw_agnostic";
+
         let (rows, cols) = (X as usize, Y as usize);
         let mut grid = create_grid(rows, cols);
         let mut next = create_grid(rows, cols);
@@ -307,9 +310,14 @@ mod faster {
         );
 
         // Spawn ffmpeg to consume raw frames via stdin
-        use std::io::Write;
-        use std::process::{Command, Stdio};
-        let output_name = format!("gol_simulation_fps_{}_X_{}_Y_{}.mp4", FPS, X, Y);
+
+        let output_name = format!(
+            "gol_simulation_fps_{}_X_{}_Y_{}_M_{}.mp4",
+            FPS,
+            X,
+            Y,
+            *super::METHOD.read().unwrap()
+        );
         let mut child = Command::new("ffmpeg")
             .args(&[
                 "-y",
@@ -371,11 +379,12 @@ mod faster {
         // Close stdin to signal EOF this ffmpeg to start encoding
         drop(ff_in);
 
-        let status = child.wait().expect("Failed to wait on ffmpeg");
+        let status: std::process::ExitStatus = child.wait().expect("Failed to wait on ffmpeg");
 
         //clear the console
-        print!("{}[2J", 27 as char);
-        println!("gol_faster_stream()");
+        //print!("{}[2J", 27 as char);
+        append_results_to_file(X, Y, MAX_ITERATIONS, random_grid_elapsed, sim_ns, io_ns);
+        println!("{}()", *super::METHOD.read().unwrap());
         println!("  Information:");
         println!("          Grid size: {}x{}", X, Y);
         println!("          Total iterations: {}", MAX_ITERATIONS);
@@ -388,25 +397,28 @@ mod faster {
             (random_grid_elapsed + sim_ns + io_ns) / 1_000_000
         );
         if status.success() {
-            println!("Video created successfully: {}", output_name);
+            //println!("Video created successfully: {}", output_name);
         } else {
             eprintln!("ffmpeg exited with status: {}", status);
         }
+    }
+    pub fn RUN() {
+        gol_faster_stream();
     }
 }
 
 mod faster_hw {
     // 512x512 take 0,32 sec so 1920
 
-    pub const FPS: u32 = 120;
-    pub const VIDEO_LENGTH_SECONDS: u32 = 10;
-    pub const VIDEO_FRAMES: u32 = FPS * VIDEO_LENGTH_SECONDS;
+    pub const FPS: u32 = super::CONFIG_FPS;
+    pub const VIDEO_LENGTH_SECONDS: u32 = super::CONFIG_VIDEO_LENGTH_SECONDS;
 
-    pub const MAX_ITERATIONS: u32 = VIDEO_FRAMES;
-    pub const X: u32 = 512; // 4k resolution
-    pub const Y: u32 = 512; // 4k resolution 
-    pub const SAVE_LOCATION: &str = "./src/frames";
+    pub const MAX_ITERATIONS: u32 = super::CONFIG_FPS * super::CONFIG_VIDEO_LENGTH_SECONDS;
+    pub const X: u32 = super::CONFIG_X; // 4k resolution
+    pub const Y: u32 = super::CONFIG_Y; // 4k resolution
+    pub const SAVE_LOCATION: &str = super::CONFIG_SAVE_LOCATION;
 
+    use crate::METHOD;
     use rand::Rng;
     use rayon::prelude::*;
     #[cfg(all(target_arch = "x86_64"))]
@@ -445,17 +457,20 @@ mod faster_hw {
         // Detect features
         #[cfg(all(target_arch = "x86_64"))]
         {
-            if is_x86_feature_detected!("avx512bw")
-                && is_x86_feature_detected!("avx512f")
-                && is_x86_feature_detected!("avx512vl")
-                && is_x86_feature_detected!("avx512dq")
-            {
-                //println!("AVX-512 detected");
-                step_kernel_avx512(current, rows, cols, out);
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                println!("AVX-512 detected");
+                //force set METHOD to avx512
+                *crate::METHOD.write().unwrap() = "fast_hw_avx512";
+                unsafe {
+                    step_kernel_avx512(current, rows, cols, out);
+                }
                 return;
             } else if is_x86_feature_detected!("avx2") {
+                *crate::METHOD.write().unwrap() = "fast_hw_avx2";
                 println!("AVX2 detected");
-                step_kernel_avx2(current, rows, cols, out);
+                unsafe {
+                    step_kernel_avx2(current, rows, cols, out);
+                }
                 return;
             }
         }
@@ -463,14 +478,16 @@ mod faster_hw {
         #[cfg(all(target_arch = "aarch64"))]
         {
             if is_aarch64_feature_detected!("neon") {
+                *crate::METHOD.write().unwrap() = "fast_hw_neon";
                 step_kernel_neon(current, rows, cols, out);
                 return;
             }
         }
 
-        // Fallback scalar unsafe parallel
-        println!("No SIMD detected, using scalar fallback");
-        step_kernel_scalar(current, rows, cols, out);
+        //*crate::METHOD.write().unwrap() = "fast_hw_scalar";
+        unsafe {
+            step_kernel_scalar(current, rows, cols, out);
+        }
     }
 
     /// Scalar unsafe kernel (row-parallel)
@@ -484,21 +501,26 @@ mod faster_hw {
                 let i = i0 + 1;
                 let row_base = i * stride;
                 // left/right borders
-                *out_row.get_unchecked_mut(0) = 0;
-                *out_row.get_unchecked_mut(cols + 1) = 0;
+                unsafe {
+                    *out_row.get_unchecked_mut(0) = 0;
+                    *out_row.get_unchecked_mut(cols + 1) = 0;
+                }
 
                 let mut idx = row_base + 1;
                 for j in 1..=cols {
-                    let alive = *current.get_unchecked(idx);
-                    let sum = *current.get_unchecked(idx - 1) as u16
-                        + *current.get_unchecked(idx + 1) as u16
-                        + *current.get_unchecked(idx - stride - 1) as u16
-                        + *current.get_unchecked(idx - stride) as u16
-                        + *current.get_unchecked(idx - stride + 1) as u16
-                        + *current.get_unchecked(idx + stride - 1) as u16
-                        + *current.get_unchecked(idx + stride) as u16
-                        + *current.get_unchecked(idx + stride + 1) as u16;
-                    *out_row.get_unchecked_mut(j) = ((sum == 3) || (alive == 1 && sum == 2)) as u8;
+                    unsafe {
+                        let alive = *current.get_unchecked(idx);
+                        let sum = *current.get_unchecked(idx - 1) as u16
+                            + *current.get_unchecked(idx + 1) as u16
+                            + *current.get_unchecked(idx - stride - 1) as u16
+                            + *current.get_unchecked(idx - stride) as u16
+                            + *current.get_unchecked(idx - stride + 1) as u16
+                            + *current.get_unchecked(idx + stride - 1) as u16
+                            + *current.get_unchecked(idx + stride) as u16
+                            + *current.get_unchecked(idx + stride + 1) as u16;
+                        *out_row.get_unchecked_mut(j) =
+                            ((sum == 3) || (alive == 1 && sum == 2)) as u8;
+                    }
                     idx += 1;
                 }
             });
@@ -683,7 +705,6 @@ mod faster_hw {
             });
     }
 
-    #[inline(always)]
     #[target_feature(enable = "avx512f,avx512vl,avx512bw,avx512dq")]
     unsafe fn process_block_avx512(
         current: &[u8],
@@ -734,10 +755,12 @@ mod faster_hw {
         let res = _mm512_mask_blend_epi8(survive_mask, _mm512_setzero_si512(), _mm512_set1_epi8(1));
 
         // FIXED: store relative to out_row, not global buffer
-        _mm512_storeu_si512(
-            out_row.as_mut_ptr().add(idx - row_base) as *mut __m512i,
-            res,
-        );
+        unsafe {
+            _mm512_storeu_si512(
+                out_row.as_mut_ptr().add(idx - row_base) as *mut __m512i,
+                res,
+            )
+        };
     }
 
     #[cfg(all(target_arch = "x86_64"))]
@@ -978,15 +1001,22 @@ mod faster_hw {
             }
         }
         let random_grid_elapsed: u128 = random_grid_timer.elapsed().as_nanos();
-        println!(
-            "Random grid initialization time for a {}x{} grid: {} ns",
-            X, Y, random_grid_elapsed
-        );
+        //println!(
+        //    "Random grid initialization time for a {}x{} grid: {} ns",
+        //    X, Y, random_grid_elapsed
+        //);
 
         // Spawn ffmpeg to consume raw frames via stdin
         use std::io::Write;
         use std::process::{Command, Stdio};
-        let output_name = format!("gol_simulation_fps_{}_X_{}_Y_{}.mp4", FPS, X, Y);
+        let output_name = format!(
+            "gol_simulation_fps_{}_X_{}_Y_{}_M_{}.mp4",
+            FPS,
+            X,
+            Y,
+            *super::METHOD.read().unwrap()
+        );
+
         let mut child = Command::new("ffmpeg")
             .args(&[
                 "-y",
@@ -1052,7 +1082,10 @@ mod faster_hw {
 
         //clear the console
         // print!("{}[2J", 27 as char);
-        println!("gol_faster_stream()");
+
+        //save data
+        super::append_results_to_file(X, Y, MAX_ITERATIONS, random_grid_elapsed, sim_ns, io_ns);
+        println!("{}()", *super::METHOD.read().unwrap());
         println!("  Information:");
         println!("          Grid size: {}x{}", X, Y);
         println!("          Total iterations: {}", MAX_ITERATIONS);
@@ -1065,56 +1098,142 @@ mod faster_hw {
             (random_grid_elapsed + sim_ns + io_ns) / 1_000_000
         );
         if status.success() {
-            println!("Video created successfully: {}", output_name);
+            //println!("Video created successfully: {}", output_name);
         } else {
             eprintln!("ffmpeg exited with status: {}", status);
         }
     }
-}
-
-fn setup() {
-    // remove ./src/frames directory if it exists
-    if std::path::Path::new("./src/frames").exists() {
-        std::fs::remove_dir_all("./src/frames").unwrap();
-    }
-    // create ./src/frames directory
-    std::fs::create_dir("./src/frames").unwrap();
-}
-// helper function to run ffmpeg to create a video from the generated PNG frames
-fn run_ffmpeg(fps: u32, x: u32, y: u32) {
-    use std::process::Command;
-
-    let output = Command::new("ffmpeg")
-        .args(&[
-            "-framerate",
-            format!("{}", fps).as_str(),
-            "-i",
-            "./src/frames/gol_%d.png",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            format!("gol_simulation_fps_{}_X_{}_Y_{}.mp4", fps, x, y).as_str(),
-        ])
-        .output()
-        .expect("Failed to execute ffmpeg command");
-
-    if output.status.success() {
-        println!(
-            "Video created successfully: gol_simulation_fps_{}_X_{}_Y_{}.mp4",
-            fps, x, y
-        );
-    } else {
-        eprintln!(
-            "Error creating video: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+    pub fn RUN() {
+        gol_faster_stream();
     }
 }
 
-// main function
+fn append_results_to_file(
+    x: u32,
+    y: u32,
+    iterations: u32,
+    init_ns: u128,
+    sim_ns: u128,
+    io_ns: u128,
+) {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    let file_path = "results.csv";
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(file_path)
+        .expect("Unable to open or create results.csv");
+    writeln!(
+        file,
+        "{},{},{},{},{},{},{},{}",
+        *METHOD.read().unwrap(),
+        x,
+        y,
+        iterations,
+        init_ns,
+        sim_ns,
+        io_ns,
+        (init_ns + sim_ns + io_ns)
+    )
+    .expect("Unable to write data to results.txt");
+}
+fn setup_results_file() {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    let file_path = "results.csv";
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(file_path)
+        .expect("Unable to open or create results.csv");
+    writeln!(file, "Method,X,Y,Iterations,Init_ns,Sim_ns,IO_ns,Total_ns")
+        .expect("Unable to write header to results.txt");
+}
+
+fn flush_cache() {
+    let cache_size = 64 * 1024 * 1024; // 64MB, adjust as needed for your CPU
+    let mut buffer = vec![0u8; cache_size];
+    for i in 0..cache_size {
+        buffer[i] = i as u8;
+    }
+    std::hint::black_box(&buffer);
+}
+
 fn main() {
-    // Use streaming pipeline to avoid slow per-frame PNG I/O
-    setup();
-    faster_hw::gol_faster_stream();
+    //check if results file exists, if not create it and add header
+    if !std::path::Path::new("results.txt").exists() {
+        setup_results_file();
+    }
+
+    let valid_args = [
+        "stock",
+        "faster",
+        "faster_hw",
+        "all",
+        "multi_faster",
+        "multi_faster_hw",
+        "clear_results",
+    ];
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 2 || !valid_args.contains(&args[1].as_str()) {
+        eprintln!("Usage: {} <method> <how_many_runs>", args[0]);
+        eprintln!("  method: one of {:?}", valid_args);
+        std::process::exit(1);
+    }
+    //take user input for how many runs
+    let runs: u32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1);
+
+    println!("if you want to change config edit top of src/main.rs and recompile the program");
+    //wait
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    print!("{}[2J", 27 as char);
+
+    match args[1].as_str() {
+        "all" => {
+            for _ in 0..runs {
+                flush_cache();
+                faster::RUN();
+            }
+            for _ in 0..runs {
+                flush_cache();
+                faster_hw::RUN();
+            }
+        }
+        "stock" => {
+            //stock::RUN();
+            println!("The stock version is disabled in this build. it take too long to run.");
+        }
+        "multi_faster" => {
+            for _ in 0..runs {
+                flush_cache();
+                faster::RUN();
+            }
+        }
+        "multi_faster_hw" => {
+            for _ in 0..runs {
+                flush_cache();
+                faster_hw::RUN();
+            }
+        }
+        "faster" => {
+            flush_cache();
+            faster::RUN();
+        }
+        "faster_hw" => {
+            flush_cache();
+            faster_hw::RUN();
+        }
+        "clear_results" => {
+            setup_results_file();
+            println!("results.txt file cleared");
+        }
+        _ => {
+            flush_cache();
+            eprintln!("Invalid method. Choose one of {:?}", valid_args);
+            std::process::exit(1);
+        }
+    }
 }
