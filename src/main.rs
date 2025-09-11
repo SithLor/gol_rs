@@ -106,6 +106,8 @@ mod slower {
 
         //clear the console
         //print!("{}[2J", 27 as char);
+              super::append_results_to_file(
+            X, Y, MAX_ITERATIONS, random_grid_elapsed, simulation_elapsed, io_elapsed);
         println!("gol_stock()");
         println!("  Information:");
         println!("          Grid size: {}x{}", X, Y);
@@ -190,6 +192,7 @@ mod slower {
         std::fs::create_dir("./src/frames").unwrap();
 
         *super::METHOD.write().unwrap() = "stock";
+  
         gol();
         run_ffmpeg(FPS, X, Y);
     }
@@ -310,14 +313,9 @@ mod faster {
         );
 
         // Spawn ffmpeg to consume raw frames via stdin
-
-        let output_name = format!(
-            "gol_simulation_fps_{}_X_{}_Y_{}_M_{}.mp4",
-            FPS,
-            X,
-            Y,
-            *super::METHOD.read().unwrap()
-        );
+        let t = *super::METHOD.read().unwrap();
+        println!("{}()", t);
+        let output_name = format!("gol_simulation_fps_{}_X_{}_Y_{}_M_{}.mp4", FPS, X, Y, t);
         let mut child = Command::new("ffmpeg")
             .args(&[
                 "-y",
@@ -423,6 +421,7 @@ mod faster_hw {
     use rayon::prelude::*;
     #[cfg(all(target_arch = "x86_64"))]
     use std::arch::x86_64::*;
+    use std::sync::RwLock;
     use std::time::Instant;
     use std::{arch::is_aarch64_feature_detected, arch::is_x86_feature_detected};
 
@@ -435,7 +434,7 @@ mod faster_hw {
     /// Public wrapper keeping your original signature.
     /// Buffers must be padded with 1-cell border: dimensions = (rows+2) x (cols+2).
     #[inline(always)]
-    pub fn step_par(current: &[u8], rows: usize, cols: usize, out: &mut [u8]) {
+    pub fn step_par(current: &[u8], rows: usize, cols: usize, out: &mut [u8], mode: &RwLock<&str>) {
         let stride = cols + 2;
         debug_assert_eq!(current.len(), (rows + 2) * stride);
         debug_assert_eq!(out.len(), (rows + 2) * stride);
@@ -446,28 +445,34 @@ mod faster_hw {
 
         // Dispatch to the best kernel available at runtime
         unsafe {
-            step_kernel_simd_dispatch(current, rows, cols, out);
+            step_kernel_simd_dispatch(current, rows, cols, out, mode);
         }
     }
 
     /// Runtime dispatch to AVX-512 (if available), AVX2, NEON, or scalar fallback.
     /// This is unsafe because kernels use unchecked loads/stores.
     #[inline(always)]
-    unsafe fn step_kernel_simd_dispatch(current: &[u8], rows: usize, cols: usize, out: &mut [u8]) {
+    unsafe fn step_kernel_simd_dispatch(
+        current: &[u8],
+        rows: usize,
+        cols: usize,
+        out: &mut [u8],
+        mode: &RwLock<&str>,
+    ) {
         // Detect features
         #[cfg(all(target_arch = "x86_64"))]
         {
             if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
-                println!("AVX-512 detected");
+                //println!("AVX-512 detected");
                 //force set METHOD to avx512
-                *crate::METHOD.write().unwrap() = "fast_hw_avx512";
+                *mode.write().unwrap() = "fast_hw_avx512";
                 unsafe {
                     step_kernel_avx512(current, rows, cols, out);
                 }
                 return;
             } else if is_x86_feature_detected!("avx2") {
-                *crate::METHOD.write().unwrap() = "fast_hw_avx2";
-                println!("AVX2 detected");
+                *mode.write().unwrap() = "fast_hw_avx2";
+                //println!("AVX2 detected");
                 unsafe {
                     step_kernel_avx2(current, rows, cols, out);
                 }
@@ -478,13 +483,13 @@ mod faster_hw {
         #[cfg(all(target_arch = "aarch64"))]
         {
             if is_aarch64_feature_detected!("neon") {
-                *crate::METHOD.write().unwrap() = "fast_hw_neon";
+                *mode.write().unwrap() = "fast_hw_neon";
                 step_kernel_neon(current, rows, cols, out);
                 return;
             }
         }
 
-        //*crate::METHOD.write().unwrap() = "fast_hw_scalar";
+        *mode.write().unwrap() = "fast_hw_scalar";
         unsafe {
             step_kernel_scalar(current, rows, cols, out);
         }
@@ -982,6 +987,9 @@ mod faster_hw {
     }
 
     pub fn gol_faster_stream() {
+        //rogh fix beace METHOD is not defined in this scope in step_par->step_kernel_avx512_>process_block_avx512
+        static MODE: &RwLock<&str> = &METHOD;
+
         let (rows, cols) = (X as usize, Y as usize);
         let mut grid = create_grid(rows, cols);
         let mut next = create_grid(rows, cols);
@@ -1009,12 +1017,16 @@ mod faster_hw {
         // Spawn ffmpeg to consume raw frames via stdin
         use std::io::Write;
         use std::process::{Command, Stdio};
+        // Run one simulation step to set the method name
+        step_par(&grid, rows, cols, &mut next, &MODE);
+        std::mem::swap(&mut grid, &mut next);
+        let method_name = *MODE.read().unwrap();
         let output_name = format!(
             "gol_simulation_fps_{}_X_{}_Y_{}_M_{}.mp4",
             FPS,
             X,
             Y,
-            *super::METHOD.read().unwrap()
+            method_name
         );
 
         let mut child = Command::new("ffmpeg")
@@ -1051,17 +1063,14 @@ mod faster_hw {
 
         let mut sim_ns: u128 = 0;
         let mut io_ns: u128 = 0;
-        for _iteration in 0..MAX_ITERATIONS {
+        // Already did first step above, so start from 1
+        for _iteration in 1..MAX_ITERATIONS {
             let timer_0 = Instant::now();
-            //run the simulation step in parallel
-            step_par(&grid, rows, cols, &mut next);
+            step_par(&grid, rows, cols, &mut next, &MODE);
             sim_ns += timer_0.elapsed().as_nanos();
-
-            // Swap so we save the just-computed generation from `grid`
             std::mem::swap(&mut grid, &mut next);
 
             let t1 = Instant::now();
-            // Convert inner region to grayscale bytes (0/255)
             let stride = cols + 2;
             for y in 0..rows {
                 let src_base = (y + 1) * stride + 1;
@@ -1085,6 +1094,9 @@ mod faster_hw {
 
         //save data
         super::append_results_to_file(X, Y, MAX_ITERATIONS, random_grid_elapsed, sim_ns, io_ns);
+
+        //append method name to mp4 file name before extension
+
         println!("{}()", *super::METHOD.read().unwrap());
         println!("  Information:");
         println!("          Grid size: {}x{}", X, Y);
@@ -1161,9 +1173,10 @@ fn flush_cache() {
     std::hint::black_box(&buffer);
 }
 
+
 fn main() {
     //check if results file exists, if not create it and add header
-    if !std::path::Path::new("results.txt").exists() {
+    if !std::path::Path::new("results.csv").exists() {
         setup_results_file();
     }
 
@@ -1175,6 +1188,7 @@ fn main() {
         "multi_faster",
         "multi_faster_hw",
         "clear_results",
+        "multi_stock",
     ];
     let args: Vec<String> = std::env::args().collect();
 
@@ -1203,7 +1217,13 @@ fn main() {
             }
         }
         "stock" => {
-            //stock::RUN();
+            //alert the complie 
+
+            slower::RUN();
+        }
+        "multi_stock" => {
+            //alert the complie 
+            slower::RUN();
             println!("The stock version is disabled in this build. it take too long to run.");
         }
         "multi_faster" => {
@@ -1231,9 +1251,7 @@ fn main() {
             println!("results.txt file cleared");
         }
         _ => {
-            flush_cache();
-            eprintln!("Invalid method. Choose one of {:?}", valid_args);
-            std::process::exit(1);
+            faster_hw::RUN();
         }
     }
 }
