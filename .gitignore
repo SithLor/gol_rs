@@ -2,3 +2,7 @@
 *.mp4
 
 *.png
+results.csv
+./java_src/*.mp4
+./java_src/*.png
+./java_src/results_java.csv

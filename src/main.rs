@@ -990,7 +990,12 @@ fn flush_cache() {
     std::hint::black_box(&buffer);
 }
 
-fn main() {
+
+fn main(){
+    faster_hw::RUN();
+
+}
+fn _main() {
     //check if results file exists, if not create it and add header
     if !std::path::Path::new("results.csv").exists() {
         setup_results_file();
