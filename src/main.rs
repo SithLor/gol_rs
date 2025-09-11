@@ -1219,7 +1219,8 @@ fn main() {
         "stock" => {
             //alert the complie 
 
-            slower::RUN();
+            //slower::RUN();
+            println!("The stock version is disabled in this build. it take too long to run and build it make build time go from 0.10 sec to 30sec .");
         }
         "multi_stock" => {
             //alert the complie 
