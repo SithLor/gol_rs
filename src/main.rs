@@ -330,8 +330,7 @@ mod faster_hw {
     ///////////////////////////////////////////////////////////////////////////////
     // NEON kernel (aarch64)
     ///////////////////////////////////////////////////////////////////////////////
-    #[cfg(all(target_arch = "aarch64"))]
-    #[target_feature(enable = "neon")]
+ 
     unsafe fn step_kernel_neon(current: &[u8], rows: usize, cols: usize, out: &mut [u8]) {
         use std::arch::aarch64::*;
         let stride = cols + 2;
