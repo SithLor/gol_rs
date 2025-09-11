@@ -1,7 +1,7 @@
-const CONFIG_FPS: u32 = 120;
-const CONFIG_VIDEO_LENGTH_SECONDS: u32 = 10;
-const CONFIG_X: u32 = 512; // 4k resolution
-const CONFIG_Y: u32 = 512; // 4k resolution
+const CONFIG_FPS: u32 = 30;// 24, 30, 60 
+const CONFIG_VIDEO_LENGTH_SECONDS: u32 = 10;// 10, 30, 60
+const CONFIG_X: u32 = 2560; // 1920, 2560, 3840 ,
+const CONFIG_Y: u32 = 1440; // 1080, 1440, 2160 
 const CONFIG_SAVE_LOCATION: &str = "./src/frames";
 const CONFIG_MAX_ITERATIONS: u32 = CONFIG_FPS * CONFIG_VIDEO_LENGTH_SECONDS;
 
@@ -12,191 +12,6 @@ use std::time::Instant;
 use rayon::str::SplitWhitespace;
 static METHOD: RwLock<&str> = RwLock::new(" ");
 
-mod slower {
-    pub const FPS: u32 = super::CONFIG_FPS;
-    pub const VIDEO_LENGTH_SECONDS: u32 = super::CONFIG_VIDEO_LENGTH_SECONDS;
-
-    pub const MAX_ITERATIONS: u32 = super::CONFIG_FPS * super::CONFIG_VIDEO_LENGTH_SECONDS;
-    pub const X: u32 = super::CONFIG_X; // 4k resolution
-    pub const Y: u32 = super::CONFIG_Y; // 4k resolution
-    pub const SAVE_LOCATION: &str = super::CONFIG_SAVE_LOCATION;
-
-    use rand::Rng;
-    use std::time::Instant;
-
-    fn simultion(grid: &Vec<Vec<i8>>) -> Vec<Vec<i8>> {
-        // get the number of rows
-        let n = grid.len();
-
-        // get the number of columns
-        let m = grid[0].len();
-
-        // create an empty grid to compute the future generation
-        let mut future: Vec<Vec<i8>> = vec![vec![0; m]; n];
-
-        // iterate through each and every cell
-        for i in 0..n {
-            for j in 0..m {
-                let cell_state = grid[i][j];
-                let mut live_neighbors: i32 = 0;
-                for x in -1..=1 {
-                    for y in -1..=1 {
-                        let new_x = i as i32 + x;
-                        let new_y = j as i32 + y;
-                        if new_x >= 0 && new_y >= 0 && new_x < n as i32 && new_y < m as i32 {
-                            live_neighbors += grid[new_x as usize][new_y as usize] as i32;
-                        }
-                    }
-                }
-                live_neighbors -= cell_state as i32;
-                if cell_state == 1 && live_neighbors < 2 {
-                    future[i][j] = 0;
-                } else if cell_state == 1 && live_neighbors > 3 {
-                    future[i][j] = 0;
-                } else if cell_state == 0 && live_neighbors == 3 {
-                    future[i][j] = 1;
-                } else {
-                    future[i][j] = cell_state;
-                }
-            }
-        }
-
-        // return the future generation
-        future
-    }
-    fn gol() {
-        let (rows, cols) = (X as usize, Y as usize);
-        let mut grid = create_grid(rows, cols);
-        let mut grid_history = create_grid_history(rows, cols, MAX_ITERATIONS as usize);
-
-        // random state initialization
-        let random_grid_timer: Instant = Instant::now();
-        let mut rng = rand::rng();
-        for i in 0..rows {
-            for j in 0..cols {
-                grid[i][j] = if rng.random_range(0..2) == 0 { 0 } else { 1 };
-            }
-        }
-        let random_grid_elapsed: u128 = random_grid_timer.elapsed().as_nanos();
-        //println!(
-        //    "Random grid initialization time for a {}x{} grid: {} ns",
-        //    X, Y, random_grid_elapsed
-        //);
-
-        let simulation_timer: Instant = Instant::now();
-        for iteration in 0..MAX_ITERATIONS {
-            grid = simultion(&grid);
-            grid_history[iteration as usize] = grid.clone();
-        }
-        let simulation_elapsed: u128 = simulation_timer.elapsed().as_nanos();
-        //println!(
-        //    "Simulation time for {} iterations on a {}x{} grid: {} ns",
-        //    MAX_ITERATIONS, X, Y, simulation_elapsed
-        //);
-
-        let io_timer: Instant = Instant::now();
-        for iteration in 0..MAX_ITERATIONS {
-            grid_to_image(&grid_history[iteration as usize], iteration, SAVE_LOCATION);
-        }
-        let io_elapsed: u128 = io_timer.elapsed().as_nanos();
-        //println!(
-        //    "I/O time for saving {} iterations on a {}x{} grid: {} ns",
-        //    MAX_ITERATIONS, X, Y, io_elapsed
-        //);
-
-        //clear the console
-        //print!("{}[2J", 27 as char);
-              super::append_results_to_file(
-            X, Y, MAX_ITERATIONS, random_grid_elapsed, simulation_elapsed, io_elapsed);
-        println!("gol_stock()");
-        println!("  Information:");
-        println!("          Grid size: {}x{}", X, Y);
-        println!("          Total iterations: {}", MAX_ITERATIONS);
-        println!("  Summary:");
-        println!("          Init time: {} ns", random_grid_elapsed);
-        println!("          Simulation time: {} ns", simulation_elapsed);
-        println!("          I/O time: {} ns", io_elapsed);
-        println!(
-            "          Total time: {} ns",
-            (random_grid_elapsed + simulation_elapsed + io_elapsed) / 1_000_000
-        );
-    }
-
-    fn run_ffmpeg(fps: u32, x: u32, y: u32) {
-        use std::process::Command;
-
-        let output = Command::new("ffmpeg")
-            .args(&[
-                "-framerate",
-                format!("{}", fps).as_str(),
-                "-i",
-                "./src/frames/gol_%d.png",
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                format!(
-                    "gol_simulation_fps_{}_X_{}_Y_{}_M_{}.mp4",
-                    fps,
-                    x,
-                    y,
-                    *super::METHOD.read().unwrap()
-                )
-                .as_str(),
-            ])
-            .output()
-            .expect("Failed to execute ffmpeg command");
-
-        if output.status.success() {
-            println!(
-                "Video created successfully: gol_simulation_fps_{}_X_{}_Y_{}.mp4",
-                fps, x, y
-            );
-        } else {
-            eprintln!(
-                "Error creating video: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-    }
-    fn grid_to_image(grid: &Vec<Vec<i8>>, iteration: u32, save_location: &str) {
-        let n = grid.len();
-        let m = grid[0].len();
-
-        let mut imgbuf = image::ImageBuffer::<image::Rgb<u8>, Vec<u8>>::new(m as u32, n as u32);
-
-        for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
-            let value: u8 = if grid[y as usize][x as usize] == 1 {
-                255
-            } else {
-                0
-            };
-            *pixel = image::Rgb([value, value, value]);
-        }
-
-        imgbuf
-            .save(format!("{}/gol_{}.png", save_location, iteration))
-            .unwrap();
-    }
-    fn create_grid(rows: usize, cols: usize) -> Vec<Vec<i8>> {
-        vec![vec![0; cols]; rows]
-    }
-    fn create_grid_history(rows: usize, cols: usize, max_iterations: usize) -> Vec<Vec<Vec<i8>>> {
-        vec![vec![vec![0; cols]; rows]; max_iterations]
-    }
-
-    pub fn RUN() {
-        if std::path::Path::new("./src/frames").exists() {
-            std::fs::remove_dir_all("./src/frames").unwrap();
-        }
-        std::fs::create_dir("./src/frames").unwrap();
-
-        *super::METHOD.write().unwrap() = "stock";
-  
-        gol();
-        run_ffmpeg(FPS, X, Y);
-    }
-}
 
 mod faster {
     // 512x512 take 0,32 sec so 1920
@@ -316,6 +131,11 @@ mod faster {
         let t = *super::METHOD.read().unwrap();
         println!("{}()", t);
         let output_name = format!("gol_simulation_fps_{}_X_{}_Y_{}_M_{}.mp4", FPS, X, Y, t);
+
+      
+
+
+        let output_name = format!("gol_simulation_fps_{}_X_{}_Y_{}_M_{}.mp4", FPS, X, Y, t);
         let mut child = Command::new("ffmpeg")
             .args(&[
                 "-y",
@@ -332,11 +152,11 @@ mod faster {
                 "-i",
                 "pipe:0",
                 "-c:v",
-                "libx264",
+                "libx265",
                 "-preset",
-                "ultrafast",
+                "medium",
                 "-pix_fmt",
-                "yuv420p",
+                "gray",
                 &output_name,
             ])
             .stdin(Stdio::piped())
@@ -1023,10 +843,7 @@ mod faster_hw {
         let method_name = *MODE.read().unwrap();
         let output_name = format!(
             "gol_simulation_fps_{}_X_{}_Y_{}_M_{}.mp4",
-            FPS,
-            X,
-            Y,
-            method_name
+            FPS, X, Y, method_name
         );
 
         let mut child = Command::new("ffmpeg")
@@ -1047,9 +864,9 @@ mod faster_hw {
                 "-c:v",
                 "libx264",
                 "-preset",
-                "ultrafast",
+                "medium",
                 "-pix_fmt",
-                "yuv420p",
+                "gray",
                 &output_name,
             ])
             .stdin(Stdio::piped())
@@ -1165,14 +982,13 @@ fn setup_results_file() {
 }
 
 fn flush_cache() {
-    let cache_size = 64 * 1024 * 1024; // 64MB, adjust as needed for your CPU
+    let cache_size = 38 * 1024 * 1024; // 64MB, adjust as needed for your CPU
     let mut buffer = vec![0u8; cache_size];
     for i in 0..cache_size {
         buffer[i] = i as u8;
     }
     std::hint::black_box(&buffer);
 }
-
 
 fn main() {
     //check if results file exists, if not create it and add header
@@ -1181,14 +997,12 @@ fn main() {
     }
 
     let valid_args = [
-        "stock",
         "faster",
         "faster_hw",
         "all",
         "multi_faster",
         "multi_faster_hw",
         "clear_results",
-        "multi_stock",
     ];
     let args: Vec<String> = std::env::args().collect();
 
@@ -1202,7 +1016,7 @@ fn main() {
 
     println!("if you want to change config edit top of src/main.rs and recompile the program");
     //wait
-    std::thread::sleep(std::time::Duration::from_secs(2));
+    // std::thread::sleep(std::time::Duration::from_secs(2));
     print!("{}[2J", 27 as char);
 
     match args[1].as_str() {
@@ -1216,15 +1030,9 @@ fn main() {
                 faster_hw::RUN();
             }
         }
-        "stock" => {
-            //alert the complie 
-
-            //slower::RUN();
-            println!("The stock version is disabled in this build. it take too long to run and build it make build time go from 0.10 sec to 30sec .");
-        }
         "multi_stock" => {
-            //alert the complie 
-            slower::RUN();
+            //alert the complie
+            // slower::RUN();
             println!("The stock version is disabled in this build. it take too long to run.");
         }
         "multi_faster" => {
