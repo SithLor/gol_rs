@@ -1,7 +1,7 @@
-const CONFIG_FPS: u32 = 30;// 24, 30, 60 
+const CONFIG_FPS: u32 = 60;// 24, 30, 60 
 const CONFIG_VIDEO_LENGTH_SECONDS: u32 = 10;// 10, 30, 60
-const CONFIG_X: u32 = 2560; // 1920, 2560, 3840 ,
-const CONFIG_Y: u32 = 1440; // 1080, 1440, 2160 
+const CONFIG_X: u32 = 500; // 1920, 2560, 3840 ,
+const CONFIG_Y: u32 = 500; // 1080, 1440, 2160 
 const CONFIG_SAVE_LOCATION: &str = "./src/frames";
 const CONFIG_MAX_ITERATIONS: u32 = CONFIG_FPS * CONFIG_VIDEO_LENGTH_SECONDS;
 
@@ -129,7 +129,7 @@ mod faster {
 
         // Spawn ffmpeg to consume raw frames via stdin
         let t = *super::METHOD.read().unwrap();
-        println!("{}()", t);
+        //println!("{}()", t);
         let output_name = format!("gol_simulation_fps_{}_X_{}_Y_{}_M_{}.mp4", FPS, X, Y, t);
 
       
