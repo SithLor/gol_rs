@@ -14,6 +14,7 @@ strip = "symbols"
 rustflags = [
 	"-C", "target-cpu=znver4",
 	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
+	"-Awarnings"
 ]
 
 [target.x86_64-pc-windows-msvc]
@@ -32,11 +33,12 @@ rustflags = [
 rustflags = [
 	"-C", "target-cpu=znver4",
 	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
+	"-Awarnings"
 ]
 
 
 [target.aarch64-apple-darwin]
 rustflags = [
-	"-C", "target-cpu=apple-m1",
+	"-C", "target-cpu=apple-m2",
 	"-C", "target-feature=+neon,+fp-armv8,+crypto",
 ]

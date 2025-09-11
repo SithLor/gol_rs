@@ -239,7 +239,8 @@ mod faster_hw {
     use crate::METHOD;
     use rand::Rng;
     use rayon::prelude::*;
-
+    #[cfg(all(target_arch = "x86_64"))]
+    use std::arch::x86_64::*;
     use std::sync::RwLock;
     use std::time::Instant;
     use std::{arch::is_aarch64_feature_detected, arch::is_x86_feature_detected};
@@ -278,11 +279,35 @@ mod faster_hw {
         out: &mut [u8],
         mode: &RwLock<&str>,
     ) {
+        // Detect features
+        #[cfg(all(target_arch = "x86_64"))]
+        {
+            if is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("avx512f") {
+                //println!("AVX-512 detected");
+                //force set METHOD to avx512
+                *mode.write().unwrap() = "fast_hw_avx512";
+                unsafe {
+                    step_kernel_avx512(current, rows, cols, out);
+                }
+                return;
+            } else if is_x86_feature_detected!("avx2") {
+                *mode.write().unwrap() = "fast_hw_avx2";
+                //println!("AVX2 detected");
+                unsafe {
+                    step_kernel_avx2(current, rows, cols, out);
+                }
+                return;
+            }
+        }
 
-
-       
-        step_kernel_neon(current, rows, cols, out);
-    
+        #[cfg(all(target_arch = "aarch64"))]
+        {
+            if is_aarch64_feature_detected!("neon") {
+                *mode.write().unwrap() = "fast_hw_neon";
+                step_kernel_neon(current, rows, cols, out);
+                return;
+            }
+        }
 
         *mode.write().unwrap() = "fast_hw_scalar";
         unsafe {
@@ -326,7 +351,347 @@ mod faster_hw {
             });
     }
 
- 
+    ///////////////////////////////////////////////////////////////////////////////
+    // AVX2 kernel (existing, processes 32 bytes per loop)
+    ///////////////////////////////////////////////////////////////////////////////
+    #[cfg(all(target_arch = "x86_64"))]
+    #[target_feature(enable = "avx2")]
+    unsafe fn step_kernel_avx2(current: &[u8], rows: usize, cols: usize, out: &mut [u8]) {
+        let stride = cols + 2;
+        out[stride..(rows + 1) * stride]
+            .par_chunks_mut(stride)
+            .enumerate()
+            .for_each(|(i0, out_row)| {
+                let i = i0 + 1;
+                let row_base = i * stride;
+                // clear left/right border
+                *out_row.get_unchecked_mut(0) = 0;
+                *out_row.get_unchecked_mut(cols + 1) = 0;
+
+                use std::arch::x86_64::*;
+                let mut j = 1usize;
+
+                // process 32-byte chunks (two 16-byte loads => 32 bytes)
+                while j + 31 <= cols {
+                    let idx = row_base + j;
+                    // base pointers
+                    let p_up = current.as_ptr().add(idx - stride);
+                    let p_cur = current.as_ptr().add(idx);
+                    let p_down = current.as_ptr().add(idx + stride);
+
+                    // loads: left-shifted, center, right-shifted (each 32 bytes as two 128-bit loads)
+                    let lo_up = _mm_loadu_si128(p_up as *const __m128i);
+                    let hi_up = _mm_loadu_si128(p_up.add(16) as *const __m128i);
+                    let lo_cur = _mm_loadu_si128(p_cur as *const __m128i);
+                    let hi_cur = _mm_loadu_si128(p_cur.add(16) as *const __m128i);
+                    let lo_down = _mm_loadu_si128(p_down as *const __m128i);
+                    let hi_down = _mm_loadu_si128(p_down.add(16) as *const __m128i);
+
+                    let lo_up_l = _mm_loadu_si128(p_up.sub(1) as *const __m128i);
+                    let hi_up_l = _mm_loadu_si128(p_up.sub(1).add(16) as *const __m128i);
+                    let lo_cur_l = _mm_loadu_si128(p_cur.sub(1) as *const __m128i);
+                    let hi_cur_l = _mm_loadu_si128(p_cur.sub(1).add(16) as *const __m128i);
+                    let lo_down_l = _mm_loadu_si128(p_down.sub(1) as *const __m128i);
+                    let hi_down_l = _mm_loadu_si128(p_down.sub(1).add(16) as *const __m128i);
+
+                    let lo_up_r = _mm_loadu_si128(p_up.add(1) as *const __m128i);
+                    let hi_up_r = _mm_loadu_si128(p_up.add(1).add(16) as *const __m128i);
+                    let lo_cur_r = _mm_loadu_si128(p_cur.add(1) as *const __m128i);
+                    let hi_cur_r = _mm_loadu_si128(p_cur.add(1).add(16) as *const __m128i);
+                    let lo_down_r = _mm_loadu_si128(p_down.add(1) as *const __m128i);
+                    let hi_down_r = _mm_loadu_si128(p_down.add(1).add(16) as *const __m128i);
+
+                    // widen to 16-bit lanes
+                    let up_lo_i16 = _mm256_cvtepu8_epi16(lo_up);
+                    let cur_lo_i16 = _mm256_cvtepu8_epi16(lo_cur);
+                    let down_lo_i16 = _mm256_cvtepu8_epi16(lo_down);
+                    let up_l_lo_i16 = _mm256_cvtepu8_epi16(lo_up_l);
+                    let cur_l_lo_i16 = _mm256_cvtepu8_epi16(lo_cur_l);
+                    let down_l_lo_i16 = _mm256_cvtepu8_epi16(lo_down_l);
+                    let up_r_lo_i16 = _mm256_cvtepu8_epi16(lo_up_r);
+                    let cur_r_lo_i16 = _mm256_cvtepu8_epi16(lo_cur_r);
+                    let down_r_lo_i16 = _mm256_cvtepu8_epi16(lo_down_r);
+
+                    let up_hi_i16 = _mm256_cvtepu8_epi16(hi_up);
+                    let cur_hi_i16 = _mm256_cvtepu8_epi16(hi_cur);
+                    let down_hi_i16 = _mm256_cvtepu8_epi16(hi_down);
+                    let up_l_hi_i16 = _mm256_cvtepu8_epi16(hi_up_l);
+                    let cur_l_hi_i16 = _mm256_cvtepu8_epi16(hi_cur_l);
+                    let down_l_hi_i16 = _mm256_cvtepu8_epi16(hi_down_l);
+                    let up_r_hi_i16 = _mm256_cvtepu8_epi16(hi_up_r);
+                    let cur_r_hi_i16 = _mm256_cvtepu8_epi16(hi_cur_r);
+                    let down_r_hi_i16 = _mm256_cvtepu8_epi16(hi_down_r);
+
+                    // sums
+                    let mut sum_lo = _mm256_add_epi16(cur_l_lo_i16, cur_r_lo_i16);
+                    sum_lo = _mm256_add_epi16(sum_lo, up_l_lo_i16);
+                    sum_lo = _mm256_add_epi16(sum_lo, up_lo_i16);
+                    sum_lo = _mm256_add_epi16(sum_lo, up_r_lo_i16);
+                    sum_lo = _mm256_add_epi16(sum_lo, down_l_lo_i16);
+                    sum_lo = _mm256_add_epi16(sum_lo, down_lo_i16);
+                    sum_lo = _mm256_add_epi16(sum_lo, down_r_lo_i16);
+
+                    let mut sum_hi = _mm256_add_epi16(cur_l_hi_i16, cur_r_hi_i16);
+                    sum_hi = _mm256_add_epi16(sum_hi, up_l_hi_i16);
+                    sum_hi = _mm256_add_epi16(sum_hi, up_hi_i16);
+                    sum_hi = _mm256_add_epi16(sum_hi, up_r_hi_i16);
+                    sum_hi = _mm256_add_epi16(sum_hi, down_l_hi_i16);
+                    sum_hi = _mm256_add_epi16(sum_hi, down_hi_i16);
+                    sum_hi = _mm256_add_epi16(sum_hi, down_r_hi_i16);
+
+                    // masks
+                    let three = _mm256_set1_epi16(3);
+                    let mask_eq3_lo = _mm256_cmpeq_epi16(sum_lo, three);
+                    let mask_eq3_hi = _mm256_cmpeq_epi16(sum_hi, three);
+
+                    let two = _mm256_set1_epi16(2);
+                    let mask_eq2_lo = _mm256_cmpeq_epi16(sum_lo, two);
+                    let mask_eq2_hi = _mm256_cmpeq_epi16(sum_hi, two);
+
+                    let one = _mm256_set1_epi16(1);
+                    let alive_is_1_lo = _mm256_cmpeq_epi16(cur_lo_i16, one);
+                    let alive_is_1_hi = _mm256_cmpeq_epi16(cur_hi_i16, one);
+
+                    let tmp_lo = _mm256_and_si256(mask_eq2_lo, alive_is_1_lo);
+                    let survivors_lo = _mm256_or_si256(mask_eq3_lo, tmp_lo);
+
+                    let tmp_hi = _mm256_and_si256(mask_eq2_hi, alive_is_1_hi);
+                    let survivors_hi = _mm256_or_si256(mask_eq3_hi, tmp_hi);
+
+                    // pack back to bytes (two 128-bit stores)
+                    let packed = _mm256_packus_epi16(survivors_lo, survivors_hi);
+                    let out_lo_128 = _mm256_castsi256_si128(packed);
+                    let out_hi_128 = _mm256_extracti128_si256(packed, 1);
+
+                    _mm_storeu_si128(out_row.as_mut_ptr().add(j) as *mut __m128i, out_lo_128);
+                    _mm_storeu_si128(out_row.as_mut_ptr().add(j + 16) as *mut __m128i, out_hi_128);
+
+                    j += 32;
+                }
+
+                // tail scalar
+                let mut idx = row_base + j;
+                while j <= cols {
+                    let alive = *current.get_unchecked(idx);
+                    let sum = *current.get_unchecked(idx - 1) as u16
+                        + *current.get_unchecked(idx + 1) as u16
+                        + *current.get_unchecked(idx - stride - 1) as u16
+                        + *current.get_unchecked(idx - stride) as u16
+                        + *current.get_unchecked(idx - stride + 1) as u16
+                        + *current.get_unchecked(idx + stride - 1) as u16
+                        + *current.get_unchecked(idx + stride) as u16
+                        + *current.get_unchecked(idx + stride + 1) as u16;
+                    *out_row.get_unchecked_mut(j) = ((sum == 3) || (alive == 1 && sum == 2)) as u8;
+                    j += 1;
+                    idx += 1;
+                }
+            });
+    }
+
+    //hell on earth - AVX-512 version processing 64 bytes per loop
+    #[cfg(all(target_arch = "x86_64"))]
+    pub unsafe fn step_kernel_avx512(current: &[u8], rows: usize, cols: usize, out: &mut [u8]) {
+        let stride = cols + 2;
+
+        // Process inner rows in parallel
+        out[stride..(rows + 1) * stride]
+            .par_chunks_mut(stride)
+            .enumerate()
+            .for_each(|(i0, out_row)| {
+                let i = i0 + 1;
+                let row_base = i * stride;
+
+                // borders = 0
+                *out_row.get_unchecked_mut(0) = 0;
+                *out_row.get_unchecked_mut(cols + 1) = 0;
+
+                let mut j = 1usize;
+                while j + 63 <= cols {
+                    process_block_avx512(current, out_row, row_base + j, stride, row_base);
+                    j += 64;
+                }
+
+                // tail (scalar fallback)
+                let mut idx = row_base + j;
+                while j <= cols {
+                    let alive = *current.get_unchecked(idx);
+                    let sum = *current.get_unchecked(idx - 1) as u16
+                        + *current.get_unchecked(idx + 1) as u16
+                        + *current.get_unchecked(idx - stride - 1) as u16
+                        + *current.get_unchecked(idx - stride) as u16
+                        + *current.get_unchecked(idx - stride + 1) as u16
+                        + *current.get_unchecked(idx + stride - 1) as u16
+                        + *current.get_unchecked(idx + stride) as u16
+                        + *current.get_unchecked(idx + stride + 1) as u16;
+                    *out_row.get_unchecked_mut(j) = ((sum == 3) || (alive == 1 && sum == 2)) as u8;
+                    j += 1;
+                    idx += 1;
+                }
+            });
+    }
+
+    #[target_feature(enable = "avx512f,avx512vl,avx512bw,avx512dq")]
+    unsafe fn process_block_avx512(
+        current: &[u8],
+        out_row: &mut [u8],
+        idx: usize,
+        stride: usize,
+        row_base: usize,
+    ) {
+        // load center
+        let c = _mm512_loadu_si512(current.as_ptr().add(idx) as *const __m512i);
+
+        // load neighbors: left/right
+        let left = _mm512_loadu_si512(current.as_ptr().add(idx - 1) as *const __m512i);
+        let right = _mm512_loadu_si512(current.as_ptr().add(idx + 1) as *const __m512i);
+
+        // load up / down rows
+        let up = _mm512_loadu_si512(current.as_ptr().add(idx - stride) as *const __m512i);
+        let down = _mm512_loadu_si512(current.as_ptr().add(idx + stride) as *const __m512i);
+
+        // diagonals
+        let up_left = _mm512_loadu_si512(current.as_ptr().add(idx - stride - 1) as *const __m512i);
+        let up_right = _mm512_loadu_si512(current.as_ptr().add(idx - stride + 1) as *const __m512i);
+        let down_left =
+            _mm512_loadu_si512(current.as_ptr().add(idx + stride - 1) as *const __m512i);
+        let down_right =
+            _mm512_loadu_si512(current.as_ptr().add(idx + stride + 1) as *const __m512i);
+
+        // sum 8 neighbors (each cell is 0/1, fits in u8)
+        let mut sum = _mm512_add_epi8(left, right);
+        sum = _mm512_add_epi8(sum, up);
+        sum = _mm512_add_epi8(sum, down);
+        sum = _mm512_add_epi8(sum, up_left);
+        sum = _mm512_add_epi8(sum, up_right);
+        sum = _mm512_add_epi8(sum, down_left);
+        sum = _mm512_add_epi8(sum, down_right);
+
+        // alive mask
+        let alive_mask = _mm512_cmpeq_epi8_mask(c, _mm512_set1_epi8(1));
+
+        // sum == 2 or 3
+        let eq2 = _mm512_cmpeq_epi8_mask(sum, _mm512_set1_epi8(2));
+        let eq3 = _mm512_cmpeq_epi8_mask(sum, _mm512_set1_epi8(3));
+
+        // rule: new = (sum==3) || (alive && sum==2)
+        let survive_mask = eq3 | (alive_mask & eq2);
+
+        // write 1 where survive_mask, else 0
+        let res = _mm512_mask_blend_epi8(survive_mask, _mm512_setzero_si512(), _mm512_set1_epi8(1));
+
+        // FIXED: store relative to out_row, not global buffer
+        unsafe {
+            _mm512_storeu_si512(
+                out_row.as_mut_ptr().add(idx - row_base) as *mut __m512i,
+                res,
+            )
+        };
+    }
+
+    #[cfg(all(target_arch = "x86_64"))]
+    #[target_feature(enable = "avx2")]
+    unsafe fn step_row_avx2_chunk(
+        current: &[u8],
+        row_base: usize,
+        stride: usize,
+        j: usize, // starting column (1..=cols) for this 32-byte chunk
+        out_row: &mut [u8],
+    ) {
+        use std::arch::x86_64::*;
+        // identical inner code as in step_kernel_avx2 for a single 32-byte chunk
+        // compute idx
+        let idx = row_base + j;
+        let p_up = current.as_ptr().add(idx - stride);
+        let p_cur = current.as_ptr().add(idx);
+        let p_down = current.as_ptr().add(idx + stride);
+
+        let lo_up = _mm_loadu_si128(p_up as *const __m128i);
+        let hi_up = _mm_loadu_si128(p_up.add(16) as *const __m128i);
+        let lo_cur = _mm_loadu_si128(p_cur as *const __m128i);
+        let hi_cur = _mm_loadu_si128(p_cur.add(16) as *const __m128i);
+        let lo_down = _mm_loadu_si128(p_down as *const __m128i);
+        let hi_down = _mm_loadu_si128(p_down.add(16) as *const __m128i);
+
+        let lo_up_l = _mm_loadu_si128(p_up.sub(1) as *const __m128i);
+        let hi_up_l = _mm_loadu_si128(p_up.sub(1).add(16) as *const __m128i);
+        let lo_cur_l = _mm_loadu_si128(p_cur.sub(1) as *const __m128i);
+        let hi_cur_l = _mm_loadu_si128(p_cur.sub(1).add(16) as *const __m128i);
+        let lo_down_l = _mm_loadu_si128(p_down.sub(1) as *const __m128i);
+        let hi_down_l = _mm_loadu_si128(p_down.sub(1).add(16) as *const __m128i);
+
+        let lo_up_r = _mm_loadu_si128(p_up.add(1) as *const __m128i);
+        let hi_up_r = _mm_loadu_si128(p_up.add(1).add(16) as *const __m128i);
+        let lo_cur_r = _mm_loadu_si128(p_cur.add(1) as *const __m128i);
+        let hi_cur_r = _mm_loadu_si128(p_cur.add(1).add(16) as *const __m128i);
+        let lo_down_r = _mm_loadu_si128(p_down.add(1) as *const __m128i);
+        let hi_down_r = _mm_loadu_si128(p_down.add(1).add(16) as *const __m128i);
+
+        let up_lo_i16 = _mm256_cvtepu8_epi16(lo_up);
+        let cur_lo_i16 = _mm256_cvtepu8_epi16(lo_cur);
+        let down_lo_i16 = _mm256_cvtepu8_epi16(lo_down);
+        let up_l_lo_i16 = _mm256_cvtepu8_epi16(lo_up_l);
+        let cur_l_lo_i16 = _mm256_cvtepu8_epi16(lo_cur_l);
+        let down_l_lo_i16 = _mm256_cvtepu8_epi16(lo_down_l);
+        let up_r_lo_i16 = _mm256_cvtepu8_epi16(lo_up_r);
+        let cur_r_lo_i16 = _mm256_cvtepu8_epi16(lo_cur_r);
+        let down_r_lo_i16 = _mm256_cvtepu8_epi16(lo_down_r);
+
+        let up_hi_i16 = _mm256_cvtepu8_epi16(hi_up);
+        let cur_hi_i16 = _mm256_cvtepu8_epi16(hi_cur);
+        let down_hi_i16 = _mm256_cvtepu8_epi16(hi_down);
+        let up_l_hi_i16 = _mm256_cvtepu8_epi16(hi_up_l);
+        let cur_l_hi_i16 = _mm256_cvtepu8_epi16(hi_cur_l);
+        let down_l_hi_i16 = _mm256_cvtepu8_epi16(hi_down_l);
+        let up_r_hi_i16 = _mm256_cvtepu8_epi16(hi_up_r);
+        let cur_r_hi_i16 = _mm256_cvtepu8_epi16(hi_cur_r);
+        let down_r_hi_i16 = _mm256_cvtepu8_epi16(hi_down_r);
+
+        let mut sum_lo = _mm256_add_epi16(cur_l_lo_i16, cur_r_lo_i16);
+        sum_lo = _mm256_add_epi16(sum_lo, up_l_lo_i16);
+        sum_lo = _mm256_add_epi16(sum_lo, up_lo_i16);
+        sum_lo = _mm256_add_epi16(sum_lo, up_r_lo_i16);
+        sum_lo = _mm256_add_epi16(sum_lo, down_l_lo_i16);
+        sum_lo = _mm256_add_epi16(sum_lo, down_lo_i16);
+        sum_lo = _mm256_add_epi16(sum_lo, down_r_lo_i16);
+
+        let mut sum_hi = _mm256_add_epi16(cur_l_hi_i16, cur_r_hi_i16);
+        sum_hi = _mm256_add_epi16(sum_hi, up_l_hi_i16);
+        sum_hi = _mm256_add_epi16(sum_hi, up_hi_i16);
+        sum_hi = _mm256_add_epi16(sum_hi, up_r_hi_i16);
+        sum_hi = _mm256_add_epi16(sum_hi, down_l_hi_i16);
+        sum_hi = _mm256_add_epi16(sum_hi, down_hi_i16);
+        sum_hi = _mm256_add_epi16(sum_hi, down_r_hi_i16);
+
+        let three = _mm256_set1_epi16(3);
+        let mask_eq3_lo = _mm256_cmpeq_epi16(sum_lo, three);
+        let mask_eq3_hi = _mm256_cmpeq_epi16(sum_hi, three);
+
+        let two = _mm256_set1_epi16(2);
+        let mask_eq2_lo = _mm256_cmpeq_epi16(sum_lo, two);
+        let mask_eq2_hi = _mm256_cmpeq_epi16(sum_hi, two);
+
+        let one = _mm256_set1_epi16(1);
+        let alive_is_1_lo = _mm256_cmpeq_epi16(cur_lo_i16, one);
+        let alive_is_1_hi = _mm256_cmpeq_epi16(cur_hi_i16, one);
+
+        let tmp_lo = _mm256_and_si256(mask_eq2_lo, alive_is_1_lo);
+        let survivors_lo = _mm256_or_si256(mask_eq3_lo, tmp_lo);
+
+        let tmp_hi = _mm256_and_si256(mask_eq2_hi, alive_is_1_hi);
+        let survivors_hi = _mm256_or_si256(mask_eq3_hi, tmp_hi);
+
+        let packed = _mm256_packus_epi16(survivors_lo, survivors_hi);
+        let out_lo_128 = _mm256_castsi256_si128(packed);
+        let out_hi_128 = _mm256_extracti128_si256(packed, 1);
+
+        use std::arch::x86_64::_mm_storeu_si128;
+        _mm_storeu_si128(out_row.as_mut_ptr().add(j) as *mut _ as *mut _, out_lo_128);
+        _mm_storeu_si128(
+            out_row.as_mut_ptr().add(j + 16) as *mut _ as *mut _,
+            out_hi_128,
+        );
+    }
+
     ///////////////////////////////////////////////////////////////////////////////
     // NEON kernel (aarch64)
     ///////////////////////////////////////////////////////////////////////////////
