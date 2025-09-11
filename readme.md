@@ -22,6 +22,9 @@ choco install ffmpeg.full
 ```
 
 
+### to run
+./start.ps1 -rust or -java or -both
+
 
 
 
