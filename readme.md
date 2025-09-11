@@ -1,5 +1,9 @@
 to use 
 
+rustup install nightly
+
+
+
 cargo build --release
 .\target\release\gol_rs.exe clear_results
 .\target\release\gol_rs.exe all 100
