@@ -991,11 +991,7 @@ fn flush_cache() {
 }
 
 
-fn main(){
-    faster_hw::RUN();
-
-}
-fn _main() {
+fn main() {
     //check if results file exists, if not create it and add header
     if !std::path::Path::new("results.csv").exists() {
         setup_results_file();
