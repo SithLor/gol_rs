@@ -9,13 +9,19 @@ After installation, open a new terminal and run:
 rustup install nightly
 ```
 
-### 2. Install Chocolatey (Windows Package Manager)
+### 2b
+Open PowerShell as Administrator and run:
+```
+winget install --id=Gyan.FFmpeg
+```
+
+### 2a. Install Chocolatey (Windows Package Manager)
 Open PowerShell as Administrator and run:
 ```
 Set-ExecutionPolicy Bypass -Scope Process -Force; iex ((New-Object System.Net.WebClient).DownloadString('http://internal/odata/repo/ChocolateyInstall.ps1'))
 ```
 
-### 3. Install ffmpeg (using Chocolatey)
+### 3a. Install ffmpeg (using Chocolatey)
 In the same PowerShell window, run:
 ```
 choco install ffmpeg.full
