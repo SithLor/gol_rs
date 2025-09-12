@@ -291,11 +291,12 @@ mod faster_hw {
                 }
                 return;
             } else if is_x86_feature_detected!("avx2") {
-                *mode.write().unwrap() = "fast_hw_avx2";
+                *mode.write().unwrap() = "fast_hw_DISABLE_AVX256";
                 //println!("AVX2 detected");
                 unsafe {
+                    step_kernel_scalar(current, rows, cols, out);
         //            step_kernel_avx2(current, rows, cols, out);
-                    step_kernel_avx512(current, rows, cols, out);
+                   // step_kernel_avx512(current, rows, cols, out);
 
                 }
                 return;
