@@ -10,11 +10,11 @@ lto = "thin"
 opt-level = 3
 strip = "symbols"
 
-[target.x86_64-unknown-linux-gnu]
-rustflags = [
-	"-C", "target-cpu=znver4",
-	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
-]
+##[target.x86_64-unknown-linux-gnu]
+##rustflags = [
+##	"-C", "target-cpu=znver4",
+##	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
+##]
 
 [target.x86_64-pc-windows-msvc]
 rustflags = [
