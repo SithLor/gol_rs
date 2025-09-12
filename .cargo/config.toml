@@ -16,27 +16,27 @@ strip = "symbols"
 ##	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
 ##]
 
-[target.x86_64-pc-windows-msvc]
-rustflags = [
-	"-C", "target-cpu=znver4",
-	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
-]
+##[target.x86_64-pc-windows-msvc]
+##rustflags = [
+##	"-C", "target-cpu=znver4",
+##	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
+##]
 
-[target.x86_64-pc-windows-gnu]
-rustflags = [
-	"-C", "target-cpu=znver4",
-	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
-]
+##[target.x86_64-pc-windows-gnu]
+##rustflags = [
+##	"-C", "target-cpu=znver4",
+##	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
+##]
 
-[target.x86_64-unknown-linux-musl]
-rustflags = [
-	"-C", "target-cpu=znver4",
-	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
-]
+##[target.x86_64-unknown-linux-musl]
+##rustflags = [
+##	"-C", "target-cpu=znver4",
+##	"-C", "target-feature=+avx512f,+avx512vl,+avx512bw,+avx512dq,+avx512cd,+avx512vnni",
+##]
 
 
-[target.aarch64-apple-darwin]
-rustflags = [
-	"-C", "target-cpu=apple-m2",
-	"-C", "target-feature=+neon,+fp-armv8,+crypto",
-]
+##[target.aarch64-apple-darwin]
+##rustflags = [
+##	"-C", "target-cpu=apple-m2",
+##	"-C", "target-feature=+neon,+fp-armv8,+crypto",
+##]
