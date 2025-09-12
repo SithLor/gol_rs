@@ -25,7 +25,7 @@ jobs:
       - name: Upload release binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gol_rs-release-binary
+          name: gol_rs-release-binary-${{ matrix.os }}
           path: |
             target/release/gol_rs
             target/release/gol_rs.exe
