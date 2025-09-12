@@ -33,9 +33,7 @@ choco install ffmpeg.full
 
 
 
-
-
-
+For max perf go to .cargo/config.toml edit the build flags 
 
 # Benchmarking Tool and things
 
