@@ -1,7 +1,7 @@
 const CONFIG_FPS: u32 = 30;// 24, 30, 60 
 const CONFIG_VIDEO_LENGTH_SECONDS: u32 = 10;// 10, 30, 60
-const CONFIG_X: u32 = 512; // 1920, 2560, 3840 ,
-const CONFIG_Y: u32 = 512; // 1080, 1440, 2160 
+const CONFIG_X: u32 = 3840; // 1920, 2560, 3840 ,
+const CONFIG_Y: u32 = 2160; // 1080, 1440, 2160 
 const CONFIG_SAVE_LOCATION: &str = "./src/frames";
 const CONFIG_MAX_ITERATIONS: u32 = CONFIG_FPS * CONFIG_VIDEO_LENGTH_SECONDS;
 
@@ -294,9 +294,12 @@ mod faster_hw {
                 *mode.write().unwrap() = "fast_hw_DISABLE_AVX256";
                 //println!("AVX2 detected");
                 unsafe {
-                    //step_kernel_scalar(current, rows, cols, out);
+                    step_kernel_scalar(current, rows, cols, out);
+                    //is broken yay
         //            step_kernel_avx2(current, rows, cols, out);
-                   step_kernel_avx512(current, rows, cols, out);
+
+                    //work on amd system
+                   //step_kernel_avx512(current, rows, cols, out);
 
                 }
                 return;
@@ -848,30 +851,8 @@ mod faster_hw {
             "gol_simulation_fps_{}_X_{}_Y_{}_M_{}.mp4",
             FPS, X, Y, method_name
         );
-
-        let mut child = Command::new("ffmpeg")
-            .args(&[
-                "-y",
-                "-loglevel",
-                "error",
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                "gray",
-                "-s",
-                &format!("{}x{}", cols, rows),
-                "-r",
-                &format!("{}", FPS),
-                "-i",
-                "pipe:0",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "medium",
-                "-pix_fmt",
-                "gray",
-                &output_name,
-            ])
+    
+  
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -907,6 +888,40 @@ mod faster_hw {
         // Close stdin to signal EOF this ffmpeg to start encoding
         drop(ff_in);
 
+  let mut child = Command::new("ffmpeg")
+    .args(&[
+        "-y",
+        "-loglevel", "error",
+        // Raw grayscale input
+        "-f", "rawvideo",
+        "-pix_fmt", "gray",
+        // 16K resolution (15360x8640) hard-coded
+        "-s", "15360x8640",
+        // FPS hard-coded
+        "-r", "30",
+        // Pipe raw frames from stdin
+        "-i", "pipe:0",
+
+        // HEVC encoder hard-coded
+        "-c:v", "libx265",
+        // Preset and CRF hard-coded
+        "-preset", "slow",
+        "-crf", "22",
+
+        // Keep output pix_fmt gray to avoid conversion
+        "-pix_fmt", "gray",
+
+        // Optional: x265 params for ultra-high resolution (remove if problematic)
+        "-x265-params", "high-tier=1:level-idc=6.2",
+
+        // Output file hard-coded
+        "gol_16k_hevc.mp4",
+    ])
+    .stdin(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped())
+    .stdout(std::process::Stdio::null())
+    .spawn()
+    .expect("Failed to start ffmpeg process");
         let status = child.wait().expect("Failed to wait on ffmpeg");
 
         //clear the console
