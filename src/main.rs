@@ -853,42 +853,7 @@ mod faster_hw {
         );
     
   
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("Failed to start ffmpeg. Is it installed and on PATH?");
-
-        let mut ff_in = child.stdin.take().expect("Failed to open ffmpeg stdin");
-        let mut frame_buf = vec![0u8; rows * cols];
-
-        let mut sim_ns: u128 = 0;
-        let mut io_ns: u128 = 0;
-        // Already did first step above, so start from 1
-        for _iteration in 1..MAX_ITERATIONS {
-            let timer_0 = Instant::now();
-            step_par(&grid, rows, cols, &mut next, &MODE);
-            sim_ns += timer_0.elapsed().as_nanos();
-            std::mem::swap(&mut grid, &mut next);
-
-            let t1 = Instant::now();
-            let stride = cols + 2;
-            for y in 0..rows {
-                let src_base = (y + 1) * stride + 1;
-                let dst_base = y * cols;
-                for x in 0..cols {
-                    frame_buf[dst_base + x] = grid[src_base + x] * 255u8;
-                }
-            }
-            ff_in
-                .write_all(&frame_buf)
-                .expect("Failed to write frame to ffmpeg");
-            io_ns += t1.elapsed().as_nanos();
-        }
-        // Close stdin to signal EOF this ffmpeg to start encoding
-        drop(ff_in);
-
-  let mut child = Command::new("ffmpeg")
+    let mut child = Command::new("ffmpeg")
     .args(&[
         "-y",
         "-loglevel", "error",
@@ -922,6 +887,37 @@ mod faster_hw {
     .stdout(std::process::Stdio::null())
     .spawn()
     .expect("Failed to start ffmpeg process");
+
+        let mut ff_in = child.stdin.take().expect("Failed to open ffmpeg stdin");
+        let mut frame_buf = vec![0u8; rows * cols];
+
+        let mut sim_ns: u128 = 0;
+        let mut io_ns: u128 = 0;
+        // Already did first step above, so start from 1
+        for _iteration in 1..MAX_ITERATIONS {
+            let timer_0 = Instant::now();
+            step_par(&grid, rows, cols, &mut next, &MODE);
+            sim_ns += timer_0.elapsed().as_nanos();
+            std::mem::swap(&mut grid, &mut next);
+
+            let t1 = Instant::now();
+            let stride = cols + 2;
+            for y in 0..rows {
+                let src_base = (y + 1) * stride + 1;
+                let dst_base = y * cols;
+                for x in 0..cols {
+                    frame_buf[dst_base + x] = grid[src_base + x] * 255u8;
+                }
+            }
+            ff_in
+                .write_all(&frame_buf)
+                .expect("Failed to write frame to ffmpeg");
+            io_ns += t1.elapsed().as_nanos();
+        }
+        // Close stdin to signal EOF this ffmpeg to start encoding
+        drop(ff_in);
+
+ 
         let status = child.wait().expect("Failed to wait on ffmpeg");
 
         //clear the console
